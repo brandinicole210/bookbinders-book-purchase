@@ -1,0 +1,594 @@
+---
+title: "Bookbinders Case Study"
+author: "Brandi Rodriguez"
+date: "March 2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#LOAD DATA    
+```{r message=FALSE, warning=FALSE}
+rm(list = ls())
+library(tidyverse)
+library(caret)
+library(e1071)
+
+#read data
+library(readxl)
+setwd(getwd())
+raw_train = read_excel('BBBC-Train.xlsx')
+raw_test = read_excel('BBBC-Test.xlsx')
+
+#make a copy and remove duplicate records
+train = distinct(raw_train)
+test = distinct(raw_test)
+
+str(train)
+```
+
+#CONVERT VARIABLES
+```{r}
+
+#convert categorical variables to factor
+train$Choice = as.factor(train$Choice)
+test$Choice = as.factor(test$Choice)
+train$Gender = as.factor(train$Gender)
+test$Gender = as.factor(test$Gender)
+
+#convert some numeric variables to integer
+train$Frequency = as.integer(train$Frequency)
+train$P_Child = as.integer(train$P_Child)
+train$P_Youth = as.integer(train$P_Youth)
+train$P_Cook = as.integer(train$P_Cook)
+train$P_DIY = as.integer(train$P_DIY)
+train$P_Art = as.integer(train$P_Art)
+
+test$Frequency = as.integer(test$Frequency)
+test$P_Child = as.integer(test$P_Child)
+test$P_Youth = as.integer(test$P_Youth)
+test$P_Cook = as.integer(test$P_Cook)
+test$P_DIY = as.integer(test$P_DIY)
+test$P_Art = as.integer(test$P_Art)
+
+str(train)
+```
+
+#MISSING VALUES
+```{r}
+sum(is.na(train))
+```
+
+The dataset has no missing values.
+```{r}
+library(Amelia)
+missmap(train, col=c("red", "gray"))
+```
+
+#EXPLORATORY DATA ANALYSIS
+```{r}
+library(DataExplorer)
+introduce(train)
+```
+The training dataset consists of 1600 observations and 10 variables. There are 2 discrete columns 
+
+```{r}
+plot_bar(train, nrow = 3L, ncol=4L, title = "Bookbinders Categorical Predictors")
+plot_bar(train, by="Choice", nrow = 3L, ncol=4L, title = "Bookbinders Categorical Predictors by Choice")
+plot_histogram(train, title = "Bookbinders Numeric Predictors")
+plot_scatterplot(train, by="Choice")
+```
+Majority of customers did not purchase the book and there is a larger number of males sampled (gender = 1), however a larger proportion of females ended up purchasing the book. 'Observation' is just indexing the sample and provides no real insight, so it needs to be removed. All numeric variables have a right skewed distribution. Scatterplots would show if there's a linear relationship between the variables and the response variable and if a data transformation may be needed, but unsurprisingly, they are ineffective in this case since the response is a binary categorical variable. 
+
+#DROP 'OBSERVATION'  
+The variable "Observation" is not a useful predictor. It's just indexing the observations.
+```{r}
+train = train[c(2:12)]
+str(train)
+```
+
+#CORRELATION
+```{r}
+library(corrplot)
+corrplot(cor(train[, 3:11]), method = "number", type = "upper", tl.col = "black", tl.srt=45)
+```
+The data exhibits no extremely strong correlations. Last_purchase and First_purchase have the strongest correlation (.81).  
+  
+#LINEAR REGRESSION 1  
+*Linear regression doesn't work if the response variable is a factor, so coerce it back to a numeric variable before running the regression model.
+```{r}
+train_linear = train
+test_linear = test
+train_linear$Choice = as.numeric(train_linear$Choice)
+test_linear$Choice = as.numeric(test_linear$Choice)
+
+
+linear1 = lm(Choice~., data=train_linear)
+summary(linear1)
+```
+
+```{r}
+predict_linear1 = predict(linear1, newdata=test_linear) #make predictions
+mean((predict_linear1 - test_linear$Choice)^2)
+```
+The full linear regression model has a low mean square error of .0925, but an r-square of .24, so only 24%  of the variance in Choice is predictable by the model.
+
+```{r message=FALSE, warning=FALSE}
+library(car)
+vif(linear1)
+```
+Last_purchase had an 81% correlation to First_purchase and has a high VIF of 18.77.
+
+#LINEAR REGRESSION 2  
+Linear regression model, dropping First_Purchase because it had a p-value > .05 in linear1, indicating it is an insignificant predictor.
+```{r}
+linear2 = lm(Choice~. - First_purchase, data=train_linear)
+summary(linear2)
+```
+
+```{r}
+predict_linear2 = predict(linear2, newdata=test_linear) #make predictions
+mean((predict_linear2 - test_linear$Choice)^2)
+```
+
+```{r}
+vif(linear2)
+```
+
+#LINEAR REGRESSION 3  
+Linear regression model, dropping Last_Purchase because of it's high VIF causing mutlicollinearity.
+```{r}
+linear3 = lm(Choice~. - Last_purchase, data=train_linear)
+summary(linear3)
+```
+
+```{r}
+predict_linear3 = predict(linear3, newdata=test_linear) #make predictions
+mean((predict_linear3 - test_linear$Choice)^2)
+```
+
+```{r}
+vif(linear3)
+```
+
+Linear regression model, dropping Last_Purchase and P_Youth
+```{r}
+linear4 = lm(Choice~. - Last_purchase - P_Youth, data=train_linear)
+summary(linear4)
+```
+
+```{r}
+predict_linear4 = predict(linear4, newdata=test_linear) #make predictions
+mean((predict_linear4 - test_linear$Choice)^2)
+```
+
+```{r}
+vif(linear4)
+```
+
+#FINAL LINEAR REGRESSION MODEL
+```{r}
+linear_final = linear2
+```
+
+Review assumptions of final linear regression model selected:
+```{r}
+par(mfrow = c(2,2))
+plot(linear_final)
+```
+The final linear regression model's diagnostics plots prove that it is an inappropriate model for BBBC's classification task. The scatterplots previously plotted showed the independent variables did not display linear relationships with the response variable. The first plot in the diagnostics plots is useful for checking the assumption of linearity and homoscedasticity. Instead of randomly scattered residuals with a straight and horizontal line centered around y = 0, which is characteristic of linearity, the residuals form a very distinctive pattern - two downward sloping lines and a bent line. To assess if the homoscedasticity assumption is met, the residuals should be equally spread around the y = 0 line, but they are not. The normality assumption can be evaluated by looking at the QQ plot. The normality assumption is violated, as the residuals do not follow closely along the 45-degree line. The third plot is useful for checking homoscedasticity. Ideally, the red line will be flat and horizontal with equally and randomly scattered data points, so clearly the homoscedasticity assumption is not satisfied. The fourth plot tells us there are a few influential points based on Cook's distance.  
+  
+#LOGISTIC REGRESSION 1    
+Normally, dummy variables would be created for categorical variables, but in this case it's not necessary and would be redundant. Gender already has the same two levels (1 if male, 0 if not) that dummy-coding would produce.
+```{r}
+levels(train$Gender)
+```
+
+```{r}
+logit1 = glm(Choice ~., data = train, family = "binomial")
+summary(logit1)
+```
+
+```{r message=FALSE, warning=FALSE}
+#Which predictors are signifcant and calculate model fit statistics
+significant_if = summary(logit1)$coeff[-1,4]<.05
+logit1.significant = names(significant_if)[significant_if ==TRUE]
+
+logit1.significant
+AIC = AIC(logit1)
+BIC = BIC(logit1)
+cbind(AIC, BIC)
+
+#make predictions
+library(caret)
+test$PredProb = predict.glm(logit1, newdata=test, type = 'response')
+test$Pred.Choice = ifelse(test$PredProb >= .5,1,0)
+caret::confusionMatrix(as.factor(test$Pred.Choice), as.factor(test$Choice))
+
+#calculate auc
+library(ROCR)
+library(pROC)
+library(car)
+pred1 = prediction(predict(logit1, test, type = "response"), test$Choice)
+auc1 = round(as.numeric(performance(pred1, measure = "auc")@y.values), 3)
+auc1
+```
+
+```{r}
+vif(logit1)
+```
+Last_Purchase has a high VIF. 
+
+#LOGISTIC REGRESSION 2  
+Fitted model excluding First_purchase, the least significant predictor in the full logistic model.
+```{r}
+logit2 = glm(Choice ~.-First_purchase, data = train, family = "binomial")
+summary(logit2)
+```
+
+```{r message=FALSE, warning=FALSE}
+#Which predictors are signifcant and calculate model fit statistics
+significant_if = summary(logit2)$coeff[-1,4]<.05
+logit2.significant = names(significant_if)[significant_if ==TRUE]
+
+logit2.significant
+AIC = AIC(logit2)
+BIC = BIC(logit2)
+cbind(AIC, BIC)
+
+#make predictions
+library(caret)
+test$PredProb = predict.glm(logit2, newdata=test, type = 'response')
+test$Pred.Choice = ifelse(test$PredProb >= .5,1,0)
+caret::confusionMatrix(as.factor(test$Pred.Choice), as.factor(test$Choice))
+
+#calculate auc
+library(ROCR)
+library(pROC)
+library(car)
+pred2 = prediction(predict(logit2, test, type = "response"), test$Choice)
+auc2 = round(as.numeric(performance(pred2, measure = "auc")@y.values), 3)
+auc2
+```
+
+#LOGISTIC REGRESSION 3  
+Fitted model excluding Last_purchase because of its high VIF.  
+```{r}
+logit3 = glm(Choice ~.-Last_purchase, data = train, family = "binomial")
+summary(logit3)
+```
+
+```{r message=FALSE, warning=FALSE}
+#Which predictors are signifcant and calculate model fit statistics
+significant_if = summary(logit3)$coeff[-1,4]<.05
+logit3.significant = names(significant_if)[significant_if ==TRUE]
+
+logit3.significant
+AIC = AIC(logit3)
+BIC = BIC(logit3)
+cbind(AIC, BIC)
+
+#make predictions
+library(caret)
+test$PredProb = predict.glm(logit3, newdata=test, type = 'response')
+test$Pred.Choice = ifelse(test$PredProb >= .5,1,0)
+caret::confusionMatrix(as.factor(test$Pred.Choice), as.factor(test$Choice))
+
+#calculate auc
+library(ROCR)
+library(pROC)
+library(car)
+pred3 = prediction(predict(logit3, test, type = "response"), test$Choice)
+auc3 = round(as.numeric(performance(pred3, measure = "auc")@y.values), 3)
+auc3
+```
+
+#LOGISTIC REGRESSION 4  
+```{r}
+logit4 = glm(Choice ~.-Last_purchase - P_Youth, data = train, family = "binomial")
+summary(logit4)
+```
+
+```{r message=FALSE, warning=FALSE}
+#Which predictors are signifcant and calculate model fit statistics
+significant_if = summary(logit4)$coeff[-1,4]<.05
+logit4.significant = names(significant_if)[significant_if ==TRUE]
+
+logit4.significant
+AIC = AIC(logit4)
+BIC = BIC(logit4)
+cbind(AIC, BIC)
+
+#make predictions
+library(caret)
+test$PredProb = predict.glm(logit4, newdata=test, type = 'response')
+test$Pred.Choice = ifelse(test$PredProb >= .5,1,0)
+caret::confusionMatrix(as.factor(test$Pred.Choice), as.factor(test$Choice))
+
+#calculate auc
+library(ROCR)
+library(pROC)
+library(car)
+pred4 = prediction(predict(logit4, test, type = "response"), test$Choice)
+auc4 = round(as.numeric(performance(pred4, measure = "auc")@y.values), 3)
+auc4
+```
+
+#FINAL LOGISTIC REGRESSION MODEL  
+logit3 will be used as the final logistic regression model because it had the highest accuracy rate (89.57%). Logit4 had the same accuracy rate, but a lower AUC.  
+```{r}
+logit_final = logit3
+```
+
+```{r}
+odds_ratio = exp(logit_final$coefficients)
+round(odds_ratio, 3)
+```
+The coefficients of logistic models are not intuitive to interpret, so it's more common to use odds ratio for interpretation instead. An odds ratio less than 1 means that an increase in x leads to a decrease in the odds that y = 1. An odds ratio greater than 1 means that na increase in x leads to an increase in the odds that y = 1.  
+
+The odds of a purchase are 100(.436 - 1) = 56.4% lower for males than females. Each increase in Amount_purchased leads to a 100(1.002-1) = 20% increase in the odds of a purchase. Each additional purchase in the chosen period leads to a 100(.887-1) = 11.3% decrease in the odds of purchasing. For each additional month since the first purchase was made, the odds of purchasing increase by 100(1.031-1) = 3.1%. For each additional children's book purchased, the odds of purchase decrease by 100(.708-1) = 29.2%. For each additional youth book purchased, the odds of purchase decrease by 100(.836-1) = 16.4%, each additional cook book reduces the odds by 36.7%, each additional DIY book decreases the odds by 34.7%, and each additional art book purchased increases the odds of purchase by 193%!  
+  
+This suggests BBBC would have better luck targeting their female customers and those who have purchased art books. 
+Review assumptions of final logistic regression model selected:
+```{r}
+#linearity assumption
+
+#predict probability of y
+probabilities = predict(logit_final, type = "response")
+predicted.classes = ifelse(probabilities > .5, 1, 0)
+
+#select only numeric predictors
+mydata=dplyr::select_if(train, is.numeric)
+predictors = colnames(mydata)
+
+#bind the logit and tidy the data for plotting
+mydata = mutate(mydata, logit = log(probabilities / (1 - probabilities)))
+mydata = gather(mydata, key = "predictors", value = "predictor.value", -logit)
+
+#plot
+ggplot(mydata, aes(logit, predictor.value))+
+  geom_point(size = .5, alpha = .5) + 
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  facet_wrap(~predictors, scales = "free_y")
+```
+The plots above can be used to visually inspect if there is a linear relationship between the continuous predictor variables and the logit of the outcome. However, in this case most of the numeric variables are not continuous. Instead, they are discrete integer variables measuring counts (i.e. Frequency, P_Art, P_Child, P_Cook, etc.). Amount_purchased shows a roughly linear association with the Choice outcome in logit scale, aside from the points farthest to the left in the plot. 
+
+```{r}
+#influential observations
+plot(logit_final, which = 4, id.n = 2) #cook's distance
+```
+
+
+```{r}
+#extract model results to compute std. residuals
+library(broom)
+logit_final.data = augment(logit_final) %>%
+  mutate(index = 1:n())
+
+#display the top largest values according to Cook's distance
+logit_final.data %>% top_n(2, .cooksd)
+```
+
+```{r}
+#add a column to identify rows
+id = rownames(logit_final.data)
+logit_final.data = cbind(id=id, logit_final.data)
+
+#plot the standardized residuals
+ggplot(logit_final.data, aes(id, .std.resid)) + 
+  geom_point(aes(color = Choice), alpha = .5) +
+  theme_bw()
+```
+
+```{r}
+#filter potential influential data points with abs(.std.res) > 3
+logit_final.data %>%
+  filter(abs(.std.resid)>3)
+```
+All absolute standardized residuals were below 3, indicating there are no outliers. If there were, they could be removed, the data could be transformed to a log scale, or a nonparametric method could be used instead.
+http://www.sthda.com/english/articles/36-classification-methods-essentials/148-logistic-regression-assumptions-and-diagnostics-in-r/
+
+#SUPPORT VECTOR MACHINE 1
+```{r}
+library(e1071)
+```
+
+```{r}
+form1 = Choice ~ . 
+```
+
+Declaring gamma ranging from .01 to .1 in increments of .01, which will return 10 values of gamma. Then iterate cost from 0.1 to 1 in increments of .1, which will return 10 values for cost. 
+```{r}
+set.seed(2021)
+tuned = tune.svm(form1, data=train, gamma = seq(.01, .1, by = .01), cost = seq(.1, 1, by = .1))
+```
+
+```{r}
+#optimal parameters within our 10 by 10 grid
+tuned$best.parameters
+```
+
+```{r}
+#run an SVM using the values of the best parameters using the radial kernel
+svm1 = svm(form1, data=train, kernel = "radial", gamma = tuned$best.parameters$gamma, cost = tuned$best.parameters$cost)
+summary(svm1)
+```
+
+```{r}
+#make predictions
+svm1_predict = predict(svm1, test, type = "response")
+table(pred = svm1_predict, true = test$Choice)
+```
+
+```{r}
+caret::confusionMatrix(svm1_predict, test$Choice)
+#caret::confusionMatrix(test$Choice, svm1_predict)
+```
+
+#SUPPORT VECTOR MACHINE 2  
+Train a SVM after dropping Last_purchase because it exhibited a high VIF in prior models.
+```{r}
+form2 = Choice ~ . -Last_purchase
+```
+
+Declaring gamma ranging from .01 to .1 in increments of .01, which will return 10 values of gamma. Then iterate cost from 0.1 to 1 in increments of .1, which will return 10 values for cost. 
+```{r}
+set.seed(2021)
+tuned2 = tune.svm(form2, data=train, gamma = seq(.01, .1, by = .01), cost = seq(.1, 1, by = .1))
+```
+
+```{r}
+#optimal parameters within our 10 by 10 grid
+tuned2$best.parameters
+```
+
+```{r}
+#run an SVM using the values of the best parameters using the radial kernel
+svm2 = svm(form2, data=train, kernel = "radial", gamma = tuned2$best.parameters$gamma, cost = tuned2$best.parameters$cost)
+summary(svm2)
+```
+
+```{r}
+#make predictions
+svm2_predict = predict(svm2, test, type = "response")
+table(pred = svm2_predict, true = test$Choice)
+```
+
+```{r}
+caret::confusionMatrix(svm2_predict, test$Choice)
+```
+
+
+#SUPPORT VECTOR MACHINE 3  
+Train a SVM after dropping First_purchase because it exhibited a high VIF in prior models.
+```{r}
+form3 = Choice ~ . - First_purchase
+```
+
+Declaring gamma ranging from .01 to .1 in increments of .01, which will return 10 values of gamma. Then iterate cost from 0.1 to 1 in increments of .1, which will return 10 values for cost. 
+```{r}
+set.seed(2021)
+tuned3 = tune.svm(form3, data=train, gamma = seq(.01, .1, by = .01), cost = seq(.1, 1, by = .1))
+```
+
+```{r}
+#optimal parameters within our 10 by 10 grid
+tuned3$best.parameters
+```
+
+```{r}
+#run an SVM using the values of the best parameters using the RBF kernel
+svm3 = svm(form3, data=train, kernel = "radial", gamma = tuned3$best.parameters$gamma, cost = tuned3$best.parameters$cost)
+summary(svm3)
+```
+
+```{r}
+#make predictions
+svm3_predict = predict(svm3, test, type = "response")
+table(pred = svm3_predict, true = test$Choice)
+```
+
+```{r}
+caret::confusionMatrix(svm3_predict, test$Choice)
+```
+
+
+#SUPPORT VECTOR MACHINE 4  
+Using form1 from svm1, but with a linear kernel
+```{r}
+form4 = form1
+```
+
+Declaring gamma ranging from .01 to .1 in increments of .01, which will return 10 values of gamma. Then iterate cost from 0.1 to 1 in increments of .1, which will return 10 values for cost. 
+```{r}
+set.seed(2021)
+tuned4 = tune.svm(form4, data=train, gamma = seq(.01, .1, by = .01), cost = seq(.1, 1, by = .1))
+```
+
+```{r}
+#optimal parameters within our 10 by 10 grid
+tuned4$best.parameters
+```
+
+```{r}
+#run an SVM using the values of the best parameters using the linear kernel
+svm4 = svm(form4, data=train, kernel = "linear", gamma = tuned4$best.parameters$gamma, cost = tuned4$best.parameters$cost)
+summary(svm4)
+```
+
+```{r}
+#make predictions
+svm4_predict = predict(svm4, test, type = "response")
+table(pred = svm4_predict, true = test$Choice)
+```
+
+```{r}
+caret::confusionMatrix(svm4_predict, test$Choice)
+```
+
+#FINAL SVM MODEL
+```{r}
+svm_final = svm1
+```
+
+```{r}
+#recall the confusion matrix to get TP, TN, FP, TN
+#the confusion matrix for svm_final is the same as svm_1
+caret::confusionMatrix(svm1_predict, test$Choice)
+
+```
+
+```{r}
+TN = 2054 #true negatives
+FN = 166  #false negatives
+FP = 42   #false positives
+TP = 38   #true positives
+```
+
+
+#MAXIMIZING PROFITABILITY  
+BBBC is considering a similar mail compaign in the Midwest where it has data for 50,000 customers. They want to know which customers to target and how much more profit coudl they expect to generate using the models prepared, compared to sending the mailer to the entire list.  
+
+Compare cost of a mass campaign vs. a targeted campaign
+```{r}
+cost_no_purchase = 0.65
+cost_yes_purchase = .65+(1.45*15)
+revenue_per_purchase = 31.95
+```
+
+Estimate profit from a mass mailing campaign
+```{r}
+Mass_Total_Cost = ((TP+FN)*cost_yes_purchase)+((FP+TN)*cost_no_purchase)
+Mass_Total_Revenue = (TP+FN)*revenue_per_purchase
+Mass_Profit = Mass_Total_Revenue - Mass_Total_Cost
+Mass_Profit_per_Mailer = Mass_Profit / (TP+FN+FP+TN)
+
+Mass_Total_Cost
+Mass_Total_Revenue
+Mass_Profit
+Mass_Profit_per_Mailer
+```
+
+
+Estimate profit from a targeted mailing campaign based on SVM model
+```{r}
+#only send mailer to those predicted to be positive
+Targeted_Total_Cost = (TP*cost_yes_purchase)+(FP*cost_no_purchase)
+Targeted_Total_Revenue = (TP*revenue_per_purchase)
+Targeted_Profit = Targeted_Total_Revenue - Targeted_Total_Cost
+Targeted_Mailers = TP + FP
+Target_Profit_per_Mailer = Targeted_Profit / Targeted_Mailers
+
+Targeted_Total_Cost
+Targeted_Total_Revenue
+Targeted_Profit
+Targeted_Mailers
+Target_Profit_per_Mailer
+```
+
+
+
+
