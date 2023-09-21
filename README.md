@@ -1,1 +1,3 @@
-# bookbinders-book-purchase
+# bookbinders-book-purchase  
+
+For this project, predictive modeling is used to improve the efficacy of the Bookbinders Book Club direct mailing program. The training dataset consisted of data for 400 customers who purchased The Art History of Florence after receiving a mailing containing an advertisement for it, and 1200 customers who didn’t. Logistic regression and support vector machine models were trained to predict the response variable ‘Choice’ representing whether a customer purchased the book or not. The analysis indicates ‘P_art’ and ‘gender’ were the most influential variables in predicting a purchase will be made and concludes with a comparison of the profitability using a targeted campaign informed by the results of the SVM versus an untargeted mass campaign.
